@@ -39,8 +39,8 @@ import okhttp3.OkHttpClient;
 public class PianoQueenPlugin extends Plugin
 {
 	private static final int POH_ENTRY_COOLDOWN_TICKS = 8;
-	private static final int RETRIGGER_MUSIC_SCRIPT = 9238;
 	private static final double MAX_VOL_OPTION = 100.0;
+	private static final int MAX_CLIENT_MUSIC_VOLUME = 255;
 
 	@Inject
 	private Client client;
@@ -74,7 +74,9 @@ public class PianoQueenPlugin extends Plugin
 	private String actualCurTrack;
 	private PianoQueenSound activeSound;
 	private boolean inPohSession;
-	private boolean shouldRetriggerMusic;
+	private boolean shouldRestoreMusic;
+	private Integer suppressedMusicVolume;
+	private int suppressedMusicOption;
 
 	@Override
 	protected void startUp()
@@ -109,9 +111,7 @@ public class PianoQueenPlugin extends Plugin
 		{
 			if (client.getGameState() == GameState.LOGGED_IN)
 			{
-				int musicVol = client.getVarpValue(VarPlayerID.OPTION_MUSIC);
-				client.runScript(RETRIGGER_MUSIC_SCRIPT, InterfaceID.SettingsSide.MUSIC_SLIDER_BOBBLE, 0, 116, 1);
-				client.runScript(RETRIGGER_MUSIC_SCRIPT, InterfaceID.SettingsSide.MUSIC_SLIDER_BOBBLE, musicVol, 116, 1);
+				restoreClientMusic();
 			}
 
 			Widget curTrackWidget = client.getWidget(InterfaceID.Music.NOW_PLAYING_TEXT);
@@ -157,7 +157,7 @@ public class PianoQueenPlugin extends Plugin
 
 			if (isInPlayerOwnedHouse() && config.pohEntrySound() != PianoQueenSound.OFF)
 			{
-				client.setMusicVolume(0);
+				suppressClientMusic();
 				log.debug("Pre-emptively muted OSRS music upon entering POH");
 			}
 		}
@@ -173,7 +173,8 @@ public class PianoQueenPlugin extends Plugin
 			pohEntryCooldownTicks = 0;
 			actualCurTrack = null;
 			overrideWidgetsOutdated = true;
-			shouldRetriggerMusic = false;
+			shouldRestoreMusic = false;
+			suppressedMusicVolume = null;
 		}
 		else if (gameStateChanged.getGameState() == GameState.LOADING)
 		{
@@ -188,7 +189,7 @@ public class PianoQueenPlugin extends Plugin
 				log.debug("Stopping active sound {} on game state change to {}", activeSound, gameStateChanged.getGameState());
 				soundEngine.stop();
 				activeSound = null;
-				shouldRetriggerMusic = true;
+				shouldRestoreMusic = true;
 			}
 
 			if (shouldStop)
@@ -263,7 +264,7 @@ public class PianoQueenPlugin extends Plugin
 				soundEngine.stop();
 				activeSound = null;
 				inPohSession = false;
-				shouldRetriggerMusic = true;
+				shouldRestoreMusic = true;
 			}
 		}
 		wasInHouse = isInHouse;
@@ -322,7 +323,7 @@ public class PianoQueenPlugin extends Plugin
 				{
 					soundEngine.stop();
 					activeSound = null;
-					shouldRetriggerMusic = true;
+					shouldRestoreMusic = true;
 				}
 			}
 		}
@@ -359,7 +360,7 @@ public class PianoQueenPlugin extends Plugin
 				soundEngine.stop();
 				activeSound = null;
 				inPohSession = false;
-				shouldRetriggerMusic = true;
+				shouldRestoreMusic = true;
 			}
 		}
 
@@ -504,13 +505,10 @@ public class PianoQueenPlugin extends Plugin
 		double effectiveVolume = getEffectiveVolume();
 		if (activeSound == null)
 		{
-			if (shouldRetriggerMusic && client.getGameState() == GameState.LOGGED_IN)
+			if (shouldRestoreMusic && client.getGameState() == GameState.LOGGED_IN)
 			{
-				shouldRetriggerMusic = false;
-				int musicVol = client.getVarpValue(VarPlayerID.OPTION_MUSIC);
-				log.debug("Executing OSRS music retrigger script for volume: {}", musicVol);
-				client.runScript(RETRIGGER_MUSIC_SCRIPT, InterfaceID.SettingsSide.MUSIC_SLIDER_BOBBLE, 0, 116, 1);
-				client.runScript(RETRIGGER_MUSIC_SCRIPT, InterfaceID.SettingsSide.MUSIC_SLIDER_BOBBLE, musicVol, 116, 1);
+				shouldRestoreMusic = false;
+				restoreClientMusic();
 			}
 		}
 		else
@@ -519,8 +517,39 @@ public class PianoQueenPlugin extends Plugin
 			{
 				soundEngine.setVolume(effectiveVolume);
 			}
-			client.setMusicVolume(0);
+			suppressClientMusic();
 		}
+	}
+
+	private void suppressClientMusic()
+	{
+		if (suppressedMusicVolume == null)
+		{
+			suppressedMusicVolume = client.getMusicVolume();
+			suppressedMusicOption = client.getVarpValue(VarPlayerID.OPTION_MUSIC);
+		}
+		client.setMusicVolume(0);
+	}
+
+	private void restoreClientMusic()
+	{
+		if (suppressedMusicVolume == null)
+		{
+			return;
+		}
+
+		int currentMusicOption = client.getVarpValue(VarPlayerID.OPTION_MUSIC);
+		int restoredVolume = currentMusicOption == suppressedMusicOption
+			? suppressedMusicVolume
+			: getClientMusicVolume(currentMusicOption);
+		client.setMusicVolume(restoredVolume);
+		suppressedMusicVolume = null;
+	}
+
+	private static int getClientMusicVolume(int musicOption)
+	{
+		double normalizedMusicOption = Math.max(0, Math.min(musicOption, MAX_VOL_OPTION)) / MAX_VOL_OPTION;
+		return (int) Math.round(normalizedMusicOption * MAX_CLIENT_MUSIC_VOLUME);
 	}
 
 	private static final int[] POH_REGIONS = {7534, 7535, 7790, 7791, 8046, 8047, 8302, 8303};
