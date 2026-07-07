@@ -27,42 +27,30 @@
 package com.logicalsolutions;
 
 import com.adonax.audiocue.AudioCue;
-import com.google.common.collect.ImmutableMap;
 import java.io.File;
-import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
-import java.util.Map;
-import java.util.function.Function;
-import jaco.mp3.player.MP3Player;
+import java.util.Locale;
 import lombok.SneakyThrows;
 import org.slf4j.LoggerFactory;
 
 public interface PianoQueenMusicPlayer
 {
-	ImmutableMap<String, Function<URI, PianoQueenMusicPlayer>> PLAYER_PER_EXT = ImmutableMap.of(
-		".mp3", JacoPlayer::new,
-		".wav", AudioCuePlayer::new
-	);
-
-	static PianoQueenMusicPlayer create(URI media)
+	static PianoQueenMusicPlayer create(File media)
 	{
-		for (Map.Entry<String, Function<URI, PianoQueenMusicPlayer>> extAndPlayer : PLAYER_PER_EXT.entrySet())
+		if (!media.getName().toLowerCase(Locale.ROOT).endsWith(".wav"))
 		{
-			if (media.getPath().endsWith(extAndPlayer.getKey()))
-			{
-				try
-				{
-					return extAndPlayer.getValue().apply(media);
-				}
-				catch (Exception e)
-				{
-					LoggerFactory.getLogger(PianoQueenMusicPlayer.class).warn("Couldn't load player for " + media, e);
-				}
-			}
+			LoggerFactory.getLogger(PianoQueenMusicPlayer.class).warn("Unsupported PianoQueen sound format: {}", media);
+			return null;
 		}
 
-		return null;
+		try
+		{
+			return new AudioCuePlayer(media);
+		}
+		catch (Exception e)
+		{
+			LoggerFactory.getLogger(PianoQueenMusicPlayer.class).warn("Couldn't load player for " + media, e);
+			return null;
+		}
 	}
 
 	void play();
@@ -75,65 +63,15 @@ public interface PianoQueenMusicPlayer
 	{
 	}
 
-	class JacoPlayer implements PianoQueenMusicPlayer
-	{
-		public static final MP3Player player = new MP3Player();
-		private final File tempPlayFile; // A hacky solution for overriding/deleting current playing song
-
-		@SneakyThrows
-		public JacoPlayer(URI mediaFile)
-		{
-			player.clearPlayList();
-			tempPlayFile = File.createTempFile("tmpJacoPlayfile", ".mp3");
-			tempPlayFile.deleteOnExit();
-			Files.copy(new File(mediaFile).toPath(), tempPlayFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-			player.add(tempPlayFile);
-		}
-
-		@Override
-		public void play()
-		{
-			player.play();
-		}
-
-		@Override
-		public boolean isPlaying()
-		{
-			return player.isPlaying();
-		}
-
-		@Override
-		public void setVolume(double volume)
-		{
-			int intVol = (int) (volume * 100);
-			if (volume > 0 && intVol == 0)
-			{
-				intVol = 1;
-			}
-			player.setVolume(intVol);
-		}
-
-		@Override
-		public void close()
-		{
-			player.stop();
-			tempPlayFile.delete();
-		}
-	}
-
 	class AudioCuePlayer implements PianoQueenMusicPlayer
 	{
-		// Same hacky solution as JaCo even though it shouldn't happen here cause audiocue fully loads in memory
-		private final File tempPlayFile;
 		private final AudioCue audioCue;
+		private double volume = 1;
 
 		@SneakyThrows
-		private AudioCuePlayer(URI media)
+		private AudioCuePlayer(File media)
 		{
-			tempPlayFile = File.createTempFile("tmpJacoPlayfile", ".mp3");
-			tempPlayFile.deleteOnExit();
-			Files.copy(new File(media).toPath(), tempPlayFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-			audioCue = AudioCue.makeStereoCue(tempPlayFile.toURL(), 1);
+			audioCue = AudioCue.makeStereoCue(media.toURI().toURL(), 1);
 			audioCue.open();
 		}
 
@@ -144,7 +82,7 @@ public interface PianoQueenMusicPlayer
 			{
 				audioCue.releaseInstance(0);
 			}
-			audioCue.play();
+			audioCue.play(volume);
 		}
 
 		@Override
@@ -156,13 +94,16 @@ public interface PianoQueenMusicPlayer
 		@Override
 		public void setVolume(double volume)
 		{
-			audioCue.setVolume(0, volume);
+			this.volume = volume;
+			if (audioCue.getIsActive(0))
+			{
+				audioCue.setVolume(0, volume);
+			}
 		}
 
 		@Override
 		public void close()
 		{
-			tempPlayFile.delete();
 			audioCue.close();
 		}
 	}

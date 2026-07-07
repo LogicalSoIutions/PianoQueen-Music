@@ -72,7 +72,7 @@ public class PianoQueenSoundEngine
 
 		try
 		{
-			PianoQueenMusicPlayer nextPlayer = PianoQueenMusicPlayer.create(file.toURI());
+			PianoQueenMusicPlayer nextPlayer = PianoQueenMusicPlayer.create(file);
 			if (nextPlayer == null)
 			{
 				log.warn("Failed to create PianoQueen player for {}", file.getName());
